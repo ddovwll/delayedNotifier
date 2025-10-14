@@ -1,0 +1,82 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    container_name: delayed-notifier
+    depends_on:
+      - postgres
+      - rabbitmq
+      - redis
+      - smtp4dev
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: delayed_notifier
+      RABBITMQ_URL: amqp://user:user@rabbitmq:5672/
+      RABBITMQ_EXCHANGE: delayed-exchange
+      RABBITMQ_QUEUE: delayed-queue
+      RABBITMQ_ROUTING_KEY: delayed-routing-key
+      REDIS_ADDRESS: redis:6379
+      REDIS_PASSWORD: password
+      TELEGRAM_TOKEN: CHANGE-ME
+      MAIL_FROM: notifier@example.com
+      MAIL_SUBJECT: Delayed Notification
+      MAIL_SMTP_ADDR: smtp4dev:25
+      MAIL_HOST: smtp4dev
+      HTTP_PORT: 8080
+      HTTP_HOST: localhost
+    ports:
+      - "8080:8080"
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: delayed-notifier-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: delayed_notifier
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  rabbitmq:
+    image: heidiks/rabbitmq-delayed-message-exchange:4.1.0-management
+    container_name: delayed-notifier-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./docker/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./docker/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+
+
+  redis:
+    image: redis:7-alpine
+    container_name: delayed-notifier-redis
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    environment:
+      REDIS_PASSWORD: password
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  smtp4dev:
+    image: rnwood/smtp4dev:v3
+    container_name: delayed-notifier-smtp4dev
+    environment:
+      RelayOptions__SmtpPort: "25"
+      ServerOptions__HostName: smtp4dev
+    ports:
+      - "8081:80"
+      - "2525:25"
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+  redis-data:

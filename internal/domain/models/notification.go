@@ -9,18 +9,14 @@ import (
 type Status int
 
 const (
-	Pending Status = iota
-	Scheduled
+	Scheduled Status = iota
 	Sent
 	Failed
 	Cancelled
-	Retrying
 )
 
 func (s Status) String() string {
 	switch s {
-	case Pending:
-		return "Pending"
 	case Scheduled:
 		return "Scheduled"
 	case Sent:
@@ -29,8 +25,6 @@ func (s Status) String() string {
 		return "Failed"
 	case Cancelled:
 		return "Cancelled"
-	case Retrying:
-		return "Retrying"
 	default:
 		return "Unknown"
 	}
@@ -44,12 +38,12 @@ const (
 )
 
 type Notification struct {
-	ID          uuid.UUID
-	Channel     Channel
-	Recipient   string
-	Message     string
-	ScheduledAt time.Time
-	Status      Status
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID          uuid.UUID `json:"id"`
+	Channel     Channel   `json:"channel"`
+	Recipient   string    `json:"recipient"`
+	Message     string    `json:"message"`
+	ScheduledAt time.Time `json:"scheduled_at"`
+	Status      Status    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }

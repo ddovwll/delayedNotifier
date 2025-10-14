@@ -1,0 +1,53 @@
+{
+  "users": [
+    {
+      "name": "user",
+      "password": "user",
+      "tags": "administrator"
+    }
+  ],
+  "vhosts": [{ "name": "/" }],
+  "permissions": [{
+    "user": "user",
+    "vhost": "/",
+    "configure": ".*",
+    "write": ".*",
+    "read": ".*"
+  }],
+  "parameters": [],
+  "policies": [],
+  "queues": [
+    {
+      "name": "delayed-queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 86400000
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "delayed-exchange",
+      "vhost": "/",
+      "type": "x-delayed-message",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {
+        "x-delayed-type": "direct"
+      }
+    }
+  ],
+  "bindings": [
+    {
+      "source": "delayed-exchange",
+      "vhost": "/",
+      "destination": "delayed-queue",
+      "destination_type": "queue",
+      "routing_key": "delayed-routing-key",
+      "arguments": {}
+    }
+  ]
+}

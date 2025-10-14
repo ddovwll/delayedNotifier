@@ -1,5 +1,7 @@
 package contracts
 
+import "time"
+
 type MessageQueueProducer interface {
-	Publish(topic string, message []byte) error
+	Publish(routingKey string, message []byte, delay time.Duration) error
 }

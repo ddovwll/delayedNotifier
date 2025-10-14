@@ -1,7 +1,8 @@
 package notifier
 
 import (
-	"net/smtp"
+	"context"
+	"os"
 
 	"github.com/jordan-wright/email"
 )
@@ -15,7 +16,24 @@ type EmailNotifier struct {
 	host     string
 }
 
-func (n *EmailNotifier) Notify(recipient, message string) error {
+func NewEmailNotifier() *EmailNotifier {
+	from := os.Getenv("MAIL_FROM")
+	subject := os.Getenv("MAIL_SUBJECT")
+	smtpAddr := os.Getenv("MAIL_SMTP_ADDR")
+	username := os.Getenv("MAIL_USERNAME")
+	password := os.Getenv("MAIL_PASSWORD")
+	host := os.Getenv("MAIL_HOST")
+	return &EmailNotifier{
+		from:     from,
+		subject:  subject,
+		smtpAddr: smtpAddr,
+		username: username,
+		password: password,
+		host:     host,
+	}
+}
+
+func (n *EmailNotifier) Notify(_ context.Context, recipient, message string) error {
 	e := email.NewEmail()
 	e.From = n.from
 	e.To = []string{recipient}
@@ -23,7 +41,7 @@ func (n *EmailNotifier) Notify(recipient, message string) error {
 	e.Text = []byte(message)
 
 	err := e.Send(n.smtpAddr,
-		smtp.PlainAuth("", n.username, n.password, n.host))
+		nil)
 	if err != nil {
 		return err
 	}

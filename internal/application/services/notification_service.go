@@ -5,61 +5,79 @@ import (
 	"delayedNotifier/internal/application/contracts"
 	domaincontracts "delayedNotifier/internal/domain/contracts"
 	"delayedNotifier/internal/domain/models"
+	"encoding/json"
+	"errors"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-type NotificationConfig struct {
-	cacheExpiration time.Duration
-}
-
 type NotificationService struct {
 	notificationRepository domaincontracts.NotificationRepository
-	deliveryTaskService    DeliveryTaskService
+	deliveryTaskService    *DeliveryTaskService
 	notifierFactory        contracts.NotifierFactory
 	retryer                contracts.Retryer
+	cache                  contracts.Cache
 }
 
 func NewNotificationService(
 	notificationRepository domaincontracts.NotificationRepository,
-	deliveryTaskService DeliveryTaskService,
+	deliveryTaskService *DeliveryTaskService,
 	notifierFactory contracts.NotifierFactory,
 	retryer contracts.Retryer,
+	cache contracts.Cache,
 ) *NotificationService {
 	return &NotificationService{
 		notificationRepository: notificationRepository,
 		deliveryTaskService:    deliveryTaskService,
 		notifierFactory:        notifierFactory,
 		retryer:                retryer,
+		cache:                  cache,
 	}
 }
 
-func (s *NotificationService) Create(ctx context.Context, notification models.Notification) error {
-	err := s.notificationRepository.Create(ctx, &notification)
+func (s *NotificationService) Create(ctx context.Context, notification *models.Notification) error {
+	err := s.notificationRepository.Create(ctx, notification)
 	if err != nil {
 		return err
 	}
 
-	return s.createDeliveryTask(notification)
+	return s.createDeliveryTask(*notification)
 }
 
 func (s *NotificationService) createDeliveryTask(notification models.Notification) error {
 	task := models.DeliveryTask{
 		NotificationID: notification.ID,
-		ExecuteAt:      notification.ScheduledAt,
-		// todo Retries count
-		RetryCount: 5,
-		Retries:    0,
-		// todo retry time
-		NextRetryAt: notification.ScheduledAt.Add(30 * time.Second),
+		DeliveryTime:   notification.ScheduledAt,
 	}
 
 	return s.deliveryTaskService.PublishTask(task)
 }
 
 func (s *NotificationService) GetStatus(ctx context.Context, notificationId uuid.UUID) (string, error) {
-	notification, err := s.notificationRepository.GetByID(ctx, notificationId)
+	notificationJson, err := s.cache.Get(ctx, notificationId.String())
+	var notification *models.Notification
+	if err != nil {
+		notification, err = s.notificationRepository.GetByID(ctx, notificationId)
+		if err != nil {
+			return "", err
+		}
+
+		bytes, err := json.Marshal(notification)
+		if err != nil {
+			return "", err
+		}
+
+		err = s.cache.Set(ctx, notificationId.String(), string(bytes), 2*time.Hour)
+		if err != nil {
+			log.Printf("Error caching notification: %v", err)
+		}
+
+		return notification.Status.String(), nil
+	}
+
+	err = json.Unmarshal([]byte(notificationJson), notification)
 	if err != nil {
 		return "", err
 	}
@@ -74,7 +92,24 @@ func (s *NotificationService) CancelNotification(ctx context.Context, notificati
 	}
 
 	notification.Status = models.Cancelled
-	return s.notificationRepository.Update(ctx, notification)
+	err = s.notificationRepository.Update(ctx, notification)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.cache.Get(ctx, notification.ID.String())
+	if err == nil {
+		bytes, err := json.Marshal(notification)
+		if err != nil {
+			return err
+		}
+		err = s.cache.Set(ctx, notification.ID.String(), string(bytes), 2*time.Hour)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *NotificationService) Notify(ctx context.Context, task models.DeliveryTask) error {
@@ -82,13 +117,59 @@ func (s *NotificationService) Notify(ctx context.Context, task models.DeliveryTa
 	if err != nil {
 		return err
 	}
+	if notification.Status == models.Cancelled {
+		return errors.New("notification is cancelled")
+	}
 
 	notifier, err := s.notifierFactory.GetNotifier(notification.Channel)
 	if err != nil {
 		return err
 	}
 
-	return s.retryer.Retry(func() error {
-		return notifier.Notify(notification.Recipient, notification.Message)
+	err = s.retryer.Retry(func() error {
+		return notifier.Notify(ctx, notification.Recipient, notification.Message)
 	})
+	outerErr := err
+	if err != nil {
+		notification.Status = models.Failed
+		err := s.notificationRepository.Update(ctx, notification)
+		if err != nil {
+			return err
+		}
+
+		_, err = s.cache.Get(ctx, notification.ID.String())
+		if err == nil {
+			bytes, err := json.Marshal(notification)
+			if err != nil {
+				return err
+			}
+			err = s.cache.Set(ctx, notification.ID.String(), string(bytes), 2*time.Hour)
+			if err != nil {
+				return err
+			}
+		}
+
+		println("asd")
+		return outerErr
+	}
+
+	notification.Status = models.Sent
+	err = s.notificationRepository.Update(ctx, notification)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.cache.Get(ctx, notification.ID.String())
+	if err == nil {
+		bytes, err := json.Marshal(notification)
+		if err != nil {
+			return err
+		}
+		err = s.cache.Set(ctx, notification.ID.String(), string(bytes), 2*time.Hour)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
