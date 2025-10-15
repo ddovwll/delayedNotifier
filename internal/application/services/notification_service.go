@@ -57,9 +57,8 @@ func (s *NotificationService) createDeliveryTask(notification models.Notificatio
 
 func (s *NotificationService) GetStatus(ctx context.Context, notificationId uuid.UUID) (string, error) {
 	notificationJson, err := s.cache.Get(ctx, notificationId.String())
-	var notification *models.Notification
 	if err != nil {
-		notification, err = s.notificationRepository.GetByID(ctx, notificationId)
+		notification, err := s.notificationRepository.GetByID(ctx, notificationId)
 		if err != nil {
 			return "", err
 		}
@@ -77,7 +76,8 @@ func (s *NotificationService) GetStatus(ctx context.Context, notificationId uuid
 		return notification.Status.String(), nil
 	}
 
-	err = json.Unmarshal([]byte(notificationJson), notification)
+	var notification models.Notification
+	err = json.Unmarshal([]byte(notificationJson), &notification)
 	if err != nil {
 		return "", err
 	}
