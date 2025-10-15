@@ -149,7 +149,6 @@ func (s *NotificationService) Notify(ctx context.Context, task models.DeliveryTa
 			}
 		}
 
-		println("asd")
 		return outerErr
 	}
 

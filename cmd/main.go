@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "delayedNotifier/docs"
 	"delayedNotifier/internal/application/services"
 	"delayedNotifier/internal/infrastructure/cache"
 	"delayedNotifier/internal/infrastructure/data"
@@ -20,11 +21,18 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
+	"github.com/rabbitmq/amqp091-go"
+	httpSwagger "github.com/swaggo/http-swagger"
+	"github.com/wb-go/wbf/dbpg"
 	"github.com/wb-go/wbf/rabbitmq"
 	"github.com/wb-go/wbf/redis"
 	"github.com/wb-go/wbf/retry"
 )
 
+// @title        Delayed Notifier API
+// @version      1.0
+// @description  HTTP API для управления отложенными уведомлениями (создание, проверка статуса и отмена рассылок).
+// @BasePath     /
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
@@ -86,14 +94,35 @@ func main() {
 	controller := controllers.NewNotificationController(notificationService)
 	server := createServer(controller)
 	log.Println("server is running")
-	go gracefulShutdown(server, consumer, telegramListener)
+	go gracefulShutdown(server, consumer, telegramListener, redisClient, channel, db)
 	err = server.ListenAndServe()
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
-func gracefulShutdown(server *http.Server, consumer *message_queue.RabbitConsumer, telegramListener *notifier_telegram.TelegramBotListener) {
+func gracefulShutdown(server *http.Server, consumer *message_queue.RabbitConsumer, telegramListener *notifier_telegram.TelegramBotListener, redis *redis.Client, channel *amqp091.Channel, db *dbpg.DB) {
+	defer func() {
+		err := redis.Close()
+		if err != nil {
+			log.Println(err)
+		}
+		err = channel.Close()
+		if err != nil {
+			log.Println(err)
+		}
+		err = db.Master.Close()
+		if err != nil {
+			log.Println(err)
+		}
+		for _, slave := range db.Slaves {
+			err := slave.Close()
+			if err != nil {
+				log.Println(err)
+
+			}
+		}
+	}()
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -116,6 +145,7 @@ func createServer(controller *controllers.NotificationController) *http.Server {
 	}
 
 	controller.MapRoutes(mux)
+	mux.Handle("/swagger/", httpSwagger.WrapHandler)
 	server.Handler = mux
 	return server
 }

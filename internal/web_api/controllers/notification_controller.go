@@ -4,6 +4,7 @@ import (
 	"delayedNotifier/internal/application/services"
 	"delayedNotifier/internal/web_api/models/requests"
 	"encoding/json"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
@@ -23,6 +24,7 @@ func NewNotificationController(notificationService *services.NotificationService
 }
 
 func (c *NotificationController) MapRoutes(mux *http.ServeMux) *http.ServeMux {
+	mux.HandleFunc("/", c.View)
 	mux.HandleFunc("/notify", c.Create)
 	mux.HandleFunc("/notify/", func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method == "GET" {
@@ -35,6 +37,36 @@ func (c *NotificationController) MapRoutes(mux *http.ServeMux) *http.ServeMux {
 	return mux
 }
 
+func (c *NotificationController) View(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+
+	tmpl, err := template.ParseFiles("internal/web_api/public/index.html")
+	if err != nil {
+		http.Error(w, "template not found: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err = tmpl.Execute(w, nil); err != nil {
+		http.Error(w, "render error: "+err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// Create godoc
+// @Summary      Создать уведомление
+// @Description  Принимает задачу для отложенной отправки уведомления.
+// @Tags         notifications
+// @Accept       json
+// @Produce      plain
+// @Param        request  body      requests.CreateNotificationRequest  true  "Данные уведомления"
+// @Success      201      {string}  string  "UUID уведомления"
+// @Header       201      {string}  Location  "URL созданного ресурса"
+// @Failure      400      {string}  string  "Некорректный запрос"
+// @Failure      500      {string}  string  "Ошибка сервера"
+// @Router       /notify [post]
 func (c *NotificationController) Create(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	notification := requests.CreateNotificationRequest{}
@@ -60,11 +92,20 @@ func (c *NotificationController) Create(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// Status godoc
+// @Summary      Получить статус уведомления
+// @Tags         notifications
+// @Produce      plain
+// @Param        id   path      string  true  "UUID уведомления"
+// @Success      200  {string}  string  "Текущий статус"
+// @Failure      400  {string}  string  "Некорректный идентификатор"
+// @Failure      500  {string}  string  "Ошибка сервера"
+// @Router       /notify/{id} [get]
 func (c *NotificationController) Status(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 3 || parts[2] == "" {
-		http.Error(w, "order_uid not provided", http.StatusBadRequest)
+		http.Error(w, "notification_id not provided", http.StatusBadRequest)
 		return
 	}
 
@@ -87,11 +128,20 @@ func (c *NotificationController) Status(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// Cancel godoc
+// @Summary      Отменить уведомление
+// @Tags         notifications
+// @Produce      plain
+// @Param        id   path      string  true  "UUID уведомления"
+// @Success      200
+// @Failure      400  {string}  string  "Некорректный идентификатор"
+// @Failure      500  {string}  string  "Ошибка сервера"
+// @Router       /notify/{id} [delete]
 func (c *NotificationController) Cancel(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 3 || parts[2] == "" {
-		http.Error(w, "order_uid not provided", http.StatusBadRequest)
+		http.Error(w, "notification_id not provided", http.StatusBadRequest)
 		return
 	}
 

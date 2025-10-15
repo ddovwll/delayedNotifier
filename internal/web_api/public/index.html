@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Delayed Notifier UI</title>
+    <style>
+        :root {
+            color-scheme: light dark;
+            font-family: Arial, sans-serif;
+        }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            background: #f5f6f8;
+        }
+        main {
+            width: min(960px, 90vw);
+            background: #fff;
+            margin: 32px 0;
+            padding: 32px;
+            border-radius: 16px;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.1);
+        }
+        h1, h2 {
+            margin-top: 0;
+            color: #1b1b1f;
+        }
+        form {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        label {
+            display: flex;
+            flex-direction: column;
+            font-size: 14px;
+            color: #343541;
+            gap: 6px;
+        }
+        input, select, textarea {
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #c2c8d0;
+            font-size: 14px;
+            transition: border-color 0.2s ease;
+        }
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #5b6def;
+            box-shadow: 0 0 0 3px rgba(91, 109, 239, 0.2);
+        }
+        textarea {
+            resize: vertical;
+            min-height: 110px;
+        }
+        form button {
+            grid-column: 1 / -1;
+            padding: 12px 16px;
+            background: #5b6def;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            cursor: pointer;
+            transition: transform 0.1s ease, box-shadow 0.1s ease;
+        }
+        form button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 16px rgba(91, 109, 239, 0.25);
+        }
+        #feedback {
+            min-height: 20px;
+            font-size: 14px;
+            color: #e63946;
+            margin-bottom: 12px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        thead {
+            background: #1b1b1f;
+            color: #fff;
+        }
+        th, td {
+            text-align: left;
+            padding: 12px 16px;
+            border-bottom: 1px solid #e4e7eb;
+            font-size: 14px;
+        }
+        tbody td {
+            color: #000;
+        }
+        tr:last-child td {
+            border-bottom: none;
+        }
+        .status {
+            font-weight: 600;
+        }
+        .empty {
+            text-align: center;
+            color: #6c727f;
+            padding: 24px 0;
+        }
+        .action-button {
+            padding: 8px 12px;
+            background: #ef476f;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.2s ease, opacity 0.2s ease;
+        }
+        .action-button:hover {
+            background: #d43d5b;
+        }
+        .action-button:disabled {
+            background: #d3d6dc;
+            color: #555;
+            cursor: not-allowed;
+        }
+        .action-disabled {
+            color: #6c727f;
+        }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Создание уведомления</h1>
+    <form id="notification-form">
+        <label>
+            Канал
+            <select id="channel" required>
+                <option value="">Выберите канал</option>
+                <option value="0">Telegram</option>
+                <option value="1">Email</option>
+            </select>
+        </label>
+        <label>
+            Получатель
+            <input id="recipient" type="text" placeholder="username(без @) или email" required>
+        </label>
+        <label>
+            Время отправки
+            <input id="scheduled_at" type="datetime-local" required>
+        </label>
+        <label style="grid-column: 1 / -1;">
+            Сообщение
+            <textarea id="message" placeholder="Введите текст уведомления" required></textarea>
+        </label>
+        <button type="submit">Создать уведомление</button>
+    </form>
+    <div id="feedback" role="alert"></div>
+
+    <section>
+        <h2>Текущие уведомления</h2>
+        <table>
+            <thead>
+            <tr>
+                <th>ID уведомления</th>
+                <th>Статус</th>
+                <th>Действия</th>
+            </tr>
+            </thead>
+            <tbody id="notifications-body">
+            <tr class="empty"><td colspan="3">Уведомления ещё не созданы</td></tr>
+            </tbody>
+        </table>
+    </section>
+</main>
+<script>
+(function () {
+    const form = document.getElementById('notification-form');
+    const feedback = document.getElementById('feedback');
+    const tableBody = document.getElementById('notifications-body');
+    const notificationIds = [];
+    const statuses = new Map();
+    let isPolling = false;
+
+    const STATUS_LABELS = {
+        scheduled: 'Запланировано',
+        sent: 'Отправлено',
+        failed: 'Ошибка доставки',
+        cancelled: 'Отменено'
+    };
+    const FINAL_STATUSES = ['sent', 'failed', 'cancelled', 'отправлено', 'ошибка доставки', 'ошибка', 'отменено'];
+
+    function formatMessage(text, type) {
+        feedback.textContent = text;
+        feedback.style.color = type === 'error' ? '#e63946' : '#2a9d8f';
+    }
+
+    function formatStatus(rawStatus) {
+        if (!rawStatus) {
+            return 'Неизвестно';
+        }
+        const normalized = rawStatus.trim().toLowerCase();
+        return STATUS_LABELS[normalized] || rawStatus;
+    }
+
+    function isCancelable(status) {
+        if (!status) {
+            return true;
+        }
+        return !FINAL_STATUSES.includes(status.trim().toLowerCase());
+    }
+
+    function renderRows() {
+        if (notificationIds.length === 0) {
+            tableBody.innerHTML = '<tr class="empty"><td colspan="3">Уведомления ещё не созданы</td></tr>';
+            return;
+        }
+        const rows = notificationIds.map(function (id) {
+            const status = statuses.get(id) || 'Создано';
+            const cancellable = isCancelable(status);
+            const actionContent = cancellable
+                ? '<button class="action-button" data-id="' + id + '">Отменить</button>'
+                : '<span class="action-disabled">—</span>';
+            return '<tr><td>' + id + '</td><td class="status">' + status + '</td><td>' + actionContent + '</td></tr>';
+        }).join('');
+        tableBody.innerHTML = rows;
+    }
+
+    async function createNotification(payload) {
+        const response = await fetch('/notify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Не удалось создать уведомление');
+        }
+        return response.text();
+    }
+
+    async function pollStatuses() {
+        if (isPolling || notificationIds.length === 0) {
+            return;
+        }
+        isPolling = true;
+        try {
+            await Promise.all(notificationIds.map(async function (id) {
+                try {
+                    const response = await fetch('/notify/' + id);
+                    if (!response.ok) {
+                        throw new Error('Статус недоступен');
+                    }
+                    const statusText = await response.text();
+                    statuses.set(id, formatStatus(statusText || ''));
+                } catch (err) {
+                    statuses.set(id, 'Ошибка: ' + err.message);
+                }
+            }));
+            renderRows();
+        } finally {
+            isPolling = false;
+        }
+    }
+
+    async function cancelNotification(id) {
+        const response = await fetch('/notify/' + id, {
+            method: 'DELETE'
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Не удалось отменить уведомление');
+        }
+    }
+
+    form.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        const channelValue = document.getElementById('channel').value;
+        const recipientValue = document.getElementById('recipient').value.trim();
+        const scheduledValue = document.getElementById('scheduled_at').value;
+        const messageValue = document.getElementById('message').value.trim();
+
+        if (!channelValue || !recipientValue || !scheduledValue || !messageValue) {
+            formatMessage('Пожалуйста, заполните все поля', 'error');
+            return;
+        }
+
+        const scheduledDate = new Date(scheduledValue);
+        if (Number.isNaN(scheduledDate.getTime())) {
+            formatMessage('Некорректный формат даты', 'error');
+            return;
+        }
+
+        const payload = {
+            channel: Number(channelValue),
+            recipient: recipientValue,
+            message: messageValue,
+            scheduled_at: scheduledDate.toISOString()
+        };
+
+        try {
+            const id = await createNotification(payload);
+            const trimmedId = id.trim();
+            if (trimmedId && !notificationIds.includes(trimmedId)) {
+                notificationIds.unshift(trimmedId);
+                statuses.set(trimmedId, formatStatus('scheduled'));
+                renderRows();
+            }
+            form.reset();
+            formatMessage('Уведомление создано. ID: ' + trimmedId, 'success');
+        } catch (error) {
+            formatMessage(error.message, 'error');
+        }
+    });
+
+    tableBody.addEventListener('click', async function (event) {
+        const target = event.target;
+        if (!(target.matches && target.matches('button.action-button'))) {
+            return;
+        }
+        const id = target.getAttribute('data-id');
+        if (!id || target.disabled) {
+            return;
+        }
+
+        target.disabled = true;
+        const originalText = target.textContent;
+        target.textContent = 'Отмена...';
+
+        try {
+            await cancelNotification(id);
+            statuses.set(id, formatStatus('cancelled'));
+            renderRows();
+            formatMessage('Уведомление ' + id + ' отменено', 'success');
+        } catch (error) {
+            target.disabled = false;
+            target.textContent = originalText;
+            formatMessage(error.message, 'error');
+        }
+    });
+
+    setInterval(pollStatuses, 500);
+})();
+</script>
+</body>
+</html>

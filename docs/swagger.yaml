@@ -1,0 +1,112 @@
+basePath: /
+definitions:
+  models.Channel:
+    enum:
+    - 0
+    - 1
+    type: integer
+    x-enum-varnames:
+    - Telegram
+    - Email
+  requests.CreateNotificationRequest:
+    properties:
+      channel:
+        $ref: '#/definitions/models.Channel'
+      message:
+        type: string
+      recipient:
+        type: string
+      scheduled_at:
+        type: string
+    type: object
+info:
+  contact: {}
+  description: HTTP API для управления отложенными уведомлениями (создание, проверка
+    статуса и отмена рассылок).
+  title: Delayed Notifier API
+  version: "1.0"
+paths:
+  /notify:
+    post:
+      consumes:
+      - application/json
+      description: Принимает задачу для отложенной отправки уведомления.
+      parameters:
+      - description: Данные уведомления
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/requests.CreateNotificationRequest'
+      produces:
+      - text/plain
+      responses:
+        "201":
+          description: UUID уведомления
+          headers:
+            Location:
+              description: URL созданного ресурса
+              type: string
+          schema:
+            type: string
+        "400":
+          description: Некорректный запрос
+          schema:
+            type: string
+        "500":
+          description: Ошибка сервера
+          schema:
+            type: string
+      summary: Создать уведомление
+      tags:
+      - notifications
+  /notify/{id}:
+    delete:
+      parameters:
+      - description: UUID уведомления
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Некорректный идентификатор
+          schema:
+            type: string
+        "500":
+          description: Ошибка сервера
+          schema:
+            type: string
+      summary: Отменить уведомление
+      tags:
+      - notifications
+    get:
+      parameters:
+      - description: UUID уведомления
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: Текущий статус
+          schema:
+            type: string
+        "400":
+          description: Некорректный идентификатор
+          schema:
+            type: string
+        "500":
+          description: Ошибка сервера
+          schema:
+            type: string
+      summary: Получить статус уведомления
+      tags:
+      - notifications
+swagger: "2.0"

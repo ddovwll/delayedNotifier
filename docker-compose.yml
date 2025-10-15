@@ -21,7 +21,7 @@ services:
       RABBITMQ_ROUTING_KEY: delayed-routing-key
       REDIS_ADDRESS: redis:6379
       REDIS_PASSWORD: password
-      TELEGRAM_TOKEN: CHANGE-ME
+      TELEGRAM_TOKEN: CHANGE_ME
       MAIL_FROM: notifier@example.com
       MAIL_SUBJECT: Delayed Notification
       MAIL_SMTP_ADDR: smtp4dev:25

@@ -18,6 +18,8 @@ COPY docker/app/wait-for-deps.sh /usr/local/bin/wait-for-deps
 RUN chmod +x /usr/local/bin/wait-for-deps
 
 COPY --from=builder /app/delayed-notifier /app/delayed-notifier
+RUN mkdir -p /app/internal/web_api/public
+COPY --from=builder /app/internal/web_api/public/index.html /app/internal/web_api/public/index.html
 
 ENV HTTP_PORT=8080
 EXPOSE 8080
