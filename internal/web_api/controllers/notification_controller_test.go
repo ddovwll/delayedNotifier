@@ -203,6 +203,34 @@ func TestNotificationController_CreateInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestNotificationController_CreateValidationError(t *testing.T) {
+	env := newControllerEnv(nil)
+	reqPayload := requests.CreateNotificationRequest{
+		Channel:     models.Email,
+		Recipient:   "",
+		Message:     "",
+		ScheduledAt: time.Now().Add(-time.Minute),
+	}
+
+	body, _ := json.Marshal(reqPayload)
+	req := httptest.NewRequest(http.MethodPost, "/notify", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	env.controller.Create(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+
+	if env.repo.createCalls != 0 {
+		t.Fatalf("Create should not be called when validation fails")
+	}
+
+	if rec.Body.Len() == 0 {
+		t.Fatalf("expected validation error message in response body")
+	}
+}
+
 func TestNotificationController_CreateServiceError(t *testing.T) {
 	expectedErr := errors.New("create failed")
 	env := newControllerEnv(func(env *controllerEnv) {

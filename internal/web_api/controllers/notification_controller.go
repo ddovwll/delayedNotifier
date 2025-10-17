@@ -77,6 +77,11 @@ func (c *NotificationController) Create(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if err := notification.Validate(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	notificationModel := notification.MapToModel()
 	err = c.notificationService.Create(ctx, &notificationModel)
 	if err != nil {

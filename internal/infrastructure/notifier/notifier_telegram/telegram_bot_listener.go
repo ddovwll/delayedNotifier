@@ -2,7 +2,9 @@ package notifier_telegram
 
 import (
 	"context"
+	"errors"
 	"log"
+	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -50,8 +52,22 @@ func (b *TelegramBotListener) SetupBot(ctx context.Context) {
 }
 
 func (b *TelegramBotListener) processUpdate(ctx context.Context, update tgbotapi.Update) {
+	username := strings.TrimSpace(update.Message.Chat.UserName)
+	chatID := update.Message.Chat.ID
+	if username == "" {
+		log.Println("telegram username is empty")
+		msg := tgbotapi.NewMessage(chatID, "Please set a Telegram username to receive notifications")
+		if _, err := b.bot.Send(msg); err != nil {
+			log.Println("Error sending username warning:", err)
+		}
+		return
+	}
+	if chatID == 0 {
+		log.Println("telegram chat id is zero")
+		return
+	}
 
-	err := b.setUser(ctx, update.Message.Chat.UserName, update.Message.Chat.ID)
+	err := b.setUser(ctx, username, chatID)
 	if err != nil {
 		log.Println(err)
 		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Error while add user for notifications")
@@ -68,6 +84,12 @@ func (b *TelegramBotListener) processUpdate(ctx context.Context, update tgbotapi
 }
 
 func (b *TelegramBotListener) setUser(ctx context.Context, username string, chatId int64) error {
+	if strings.TrimSpace(username) == "" {
+		return errors.New("username is required")
+	}
+	if chatId == 0 {
+		return errors.New("chat id is required")
+	}
 	existing, _ := b.repository.GetByUsername(ctx, username)
 	if existing != nil {
 		return nil

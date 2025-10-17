@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,6 +21,14 @@ type NotificationService struct {
 	retryer                contracts.Retryer
 	cache                  contracts.Cache
 }
+
+var (
+	ErrNotificationRecipientRequired = errors.New("notification recipient is required")
+	ErrNotificationMessageRequired   = errors.New("notification message is required")
+	ErrNotificationInvalidChannel    = errors.New("notification channel is invalid")
+	ErrNotificationScheduledInPast   = errors.New("notification scheduled time must be in the future")
+	ErrNotificationAlreadyProcessed  = errors.New("notification already processed")
+)
 
 func NewNotificationService(
 	notificationRepository domaincontracts.NotificationRepository,
@@ -37,7 +46,35 @@ func NewNotificationService(
 	}
 }
 
+func validateNotification(notification *models.Notification) error {
+	if notification == nil {
+		return errors.New("notification is nil")
+	}
+
+	if strings.TrimSpace(notification.Recipient) == "" {
+		return ErrNotificationRecipientRequired
+	}
+
+	if strings.TrimSpace(notification.Message) == "" {
+		return ErrNotificationMessageRequired
+	}
+
+	if notification.Channel != models.Telegram && notification.Channel != models.Email {
+		return ErrNotificationInvalidChannel
+	}
+
+	if notification.ScheduledAt.IsZero() || time.Until(notification.ScheduledAt) <= 0 {
+		return ErrNotificationScheduledInPast
+	}
+
+	return nil
+}
+
 func (s *NotificationService) Create(ctx context.Context, notification *models.Notification) error {
+	if err := validateNotification(notification); err != nil {
+		return err
+	}
+
 	err := s.notificationRepository.Create(ctx, notification)
 	if err != nil {
 		return err
@@ -89,6 +126,12 @@ func (s *NotificationService) CancelNotification(ctx context.Context, notificati
 	notification, err := s.notificationRepository.GetByID(ctx, notificationId)
 	if err != nil {
 		return err
+	}
+	if notification.Status == models.Sent || notification.Status == models.Failed {
+		return ErrNotificationAlreadyProcessed
+	}
+	if notification.Status == models.Cancelled {
+		return nil
 	}
 
 	notification.Status = models.Cancelled

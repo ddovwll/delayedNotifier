@@ -266,6 +266,37 @@ func TestNotificationService_CreatePublishError(t *testing.T) {
 	}
 }
 
+func TestNotificationService_CreateValidationError(t *testing.T) {
+	ctx := context.Background()
+	repo := &stubNotificationRepository{}
+	producer := &stubProducer{}
+	deliverySvc := &DeliveryTaskService{producer: producer, routingKey: "delivery"}
+
+	svc := &NotificationService{
+		notificationRepository: repo,
+		deliveryTaskService:    deliverySvc,
+	}
+
+	notification := newNotification(uuid.New(), models.Scheduled)
+	notification.Message = ""
+
+	err := svc.Create(ctx, notification)
+	if !errors.Is(err, ErrNotificationMessageRequired) {
+		t.Fatalf("expected error %v, got %v", ErrNotificationMessageRequired, err)
+	}
+
+	notification.Message = "valid"
+	notification.ScheduledAt = time.Now().Add(-time.Minute)
+	err = svc.Create(ctx, notification)
+	if !errors.Is(err, ErrNotificationScheduledInPast) {
+		t.Fatalf("expected error %v, got %v", ErrNotificationScheduledInPast, err)
+	}
+
+	if repo.createCalls != 0 {
+		t.Fatalf("repository Create should not be called when validation fails")
+	}
+}
+
 func TestNotificationService_GetStatusCacheHit(t *testing.T) {
 	ctx := context.Background()
 	notification := newNotification(uuid.New(), models.Sent)
@@ -458,6 +489,53 @@ func TestNotificationService_CancelNotificationGetError(t *testing.T) {
 	err := svc.CancelNotification(ctx, uuid.New())
 	if !errors.Is(err, expectedErr) {
 		t.Fatalf("expected error %v, got %v", expectedErr, err)
+	}
+}
+
+func TestNotificationService_CancelNotificationAlreadyProcessed(t *testing.T) {
+	ctx := context.Background()
+	notification := newNotification(uuid.New(), models.Sent)
+	repo := &stubNotificationRepository{
+		getByIDFunc: func(context.Context, uuid.UUID) (*models.Notification, error) {
+			return notification, nil
+		},
+	}
+
+	svc := &NotificationService{
+		notificationRepository: repo,
+		cache:                  &stubCache{},
+	}
+
+	err := svc.CancelNotification(ctx, notification.ID)
+	if !errors.Is(err, ErrNotificationAlreadyProcessed) {
+		t.Fatalf("expected error %v, got %v", ErrNotificationAlreadyProcessed, err)
+	}
+
+	if repo.updateCalls != 0 {
+		t.Fatalf("repository Update should not be called when notification already processed")
+	}
+}
+
+func TestNotificationService_CancelNotificationAlreadyCancelled(t *testing.T) {
+	ctx := context.Background()
+	notification := newNotification(uuid.New(), models.Cancelled)
+	repo := &stubNotificationRepository{
+		getByIDFunc: func(context.Context, uuid.UUID) (*models.Notification, error) {
+			return notification, nil
+		},
+		updateFunc: func(context.Context, *models.Notification) error {
+			t.Fatalf("Update should not be called for already cancelled notification")
+			return nil
+		},
+	}
+
+	svc := &NotificationService{
+		notificationRepository: repo,
+		cache:                  &stubCache{},
+	}
+
+	if err := svc.CancelNotification(ctx, notification.ID); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
 	}
 }
 

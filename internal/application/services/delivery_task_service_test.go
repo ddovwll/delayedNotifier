@@ -82,3 +82,17 @@ func TestDeliveryTaskService_PublishTaskError(t *testing.T) {
 		t.Fatalf("expected error %v, got %v", expectedErr, err)
 	}
 }
+
+func TestDeliveryTaskService_PublishTaskPastTime(t *testing.T) {
+	producer := &stubMessageQueueProducer{}
+	svc := NewDeliveryTaskService(producer, "notifications")
+
+	err := svc.PublishTask(models.DeliveryTask{DeliveryTime: time.Now().Add(-time.Minute)})
+	if !errors.Is(err, ErrDeliveryTimeInPast) {
+		t.Fatalf("expected error %v, got %v", ErrDeliveryTimeInPast, err)
+	}
+
+	if producer.calls != 0 {
+		t.Fatalf("producer should not be called when delivery time is invalid")
+	}
+}
