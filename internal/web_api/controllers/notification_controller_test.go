@@ -19,13 +19,15 @@ import (
 )
 
 type testNotificationRepository struct {
-	createFunc  func(context.Context, *models.Notification) error
-	getByIDFunc func(context.Context, uuid.UUID) (*models.Notification, error)
-	updateFunc  func(context.Context, *models.Notification) error
+	createFunc       func(context.Context, *models.Notification) error
+	getByIDFunc      func(context.Context, uuid.UUID) (*models.Notification, error)
+	updateFunc       func(context.Context, *models.Notification) error
+	updateStatusFunc func(context.Context, uuid.UUID, models.Status, models.Status, time.Time) (bool, error)
 
-	createCalls  int
-	getByIDCalls int
-	updateCalls  int
+	createCalls       int
+	getByIDCalls      int
+	updateCalls       int
+	updateStatusCalls int
 }
 
 func (r *testNotificationRepository) Create(ctx context.Context, n *models.Notification) error {
@@ -53,6 +55,14 @@ func (r *testNotificationRepository) Update(ctx context.Context, n *models.Notif
 }
 
 func (r *testNotificationRepository) Delete(context.Context, uuid.UUID) error { return nil }
+
+func (r *testNotificationRepository) UpdateStatus(ctx context.Context, id uuid.UUID, current, next models.Status, updatedAt time.Time) (bool, error) {
+	r.updateStatusCalls++
+	if r.updateStatusFunc != nil {
+		return r.updateStatusFunc(ctx, id, current, next, updatedAt)
+	}
+	return true, nil
+}
 
 type testProducer struct {
 	publishFunc func(string, []byte, time.Duration) error
@@ -322,11 +332,20 @@ func TestNotificationController_CancelSuccess(t *testing.T) {
 		env.repo.getByIDFunc = func(context.Context, uuid.UUID) (*models.Notification, error) {
 			return notification, nil
 		}
-		env.repo.updateFunc = func(ctx context.Context, n *models.Notification) error {
-			if n.Status != models.Cancelled {
-				t.Fatalf("expected Cancelled status, got %v", n.Status)
+		env.repo.updateStatusFunc = func(ctx context.Context, id uuid.UUID, current, next models.Status, updatedAt time.Time) (bool, error) {
+			if id != notification.ID {
+				t.Fatalf("unexpected id: %v", id)
 			}
-			return nil
+			if current != models.Scheduled {
+				t.Fatalf("expected current status Scheduled, got %v", current)
+			}
+			if next != models.Cancelled {
+				t.Fatalf("expected next status Cancelled, got %v", next)
+			}
+			if updatedAt.IsZero() {
+				t.Fatalf("updatedAt must be set")
+			}
+			return true, nil
 		}
 		env.cache.getFunc = func(context.Context, string) (string, error) {
 			return "cached", nil
@@ -342,8 +361,8 @@ func TestNotificationController_CancelSuccess(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 
-	if env.repo.updateCalls != 1 {
-		t.Fatalf("expected Update to be called once, got %d", env.repo.updateCalls)
+	if env.repo.updateStatusCalls != 1 {
+		t.Fatalf("expected UpdateStatus to be called once, got %d", env.repo.updateStatusCalls)
 	}
 }
 

@@ -86,3 +86,28 @@ func (r *NotificationRepository) Delete(ctx context.Context, id uuid.UUID) error
 	_, err := r.db.ExecWithRetry(ctx, r.retryStrategy, query, id)
 	return err
 }
+
+func (r *NotificationRepository) UpdateStatus(
+	ctx context.Context,
+	id uuid.UUID,
+	current, next models.Status,
+	updatedAt time.Time,
+) (bool, error) {
+	query := `
+		UPDATE notifications
+		SET status = $2, updated_at = $3
+		WHERE id = $1 AND status = $4
+	`
+
+	res, err := r.db.ExecWithRetry(ctx, r.retryStrategy, query, id, next, updatedAt, current)
+	if err != nil {
+		return false, err
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	return rows > 0, nil
+}

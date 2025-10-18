@@ -14,14 +14,16 @@ import (
 )
 
 type stubNotificationRepository struct {
-	createFunc  func(context.Context, *models.Notification) error
-	getByIDFunc func(context.Context, uuid.UUID) (*models.Notification, error)
-	updateFunc  func(context.Context, *models.Notification) error
-	deleteFunc  func(context.Context, uuid.UUID) error
+	createFunc       func(context.Context, *models.Notification) error
+	getByIDFunc      func(context.Context, uuid.UUID) (*models.Notification, error)
+	updateFunc       func(context.Context, *models.Notification) error
+	deleteFunc       func(context.Context, uuid.UUID) error
+	updateStatusFunc func(context.Context, uuid.UUID, models.Status, models.Status, time.Time) (bool, error)
 
-	createCalls  int
-	getByIDCalls int
-	updateCalls  int
+	createCalls       int
+	getByIDCalls      int
+	updateCalls       int
+	updateStatusCalls int
 }
 
 func (s *stubNotificationRepository) Create(ctx context.Context, n *models.Notification) error {
@@ -53,6 +55,14 @@ func (s *stubNotificationRepository) Delete(ctx context.Context, id uuid.UUID) e
 		return s.deleteFunc(ctx, id)
 	}
 	return nil
+}
+
+func (s *stubNotificationRepository) UpdateStatus(ctx context.Context, id uuid.UUID, current, next models.Status, updatedAt time.Time) (bool, error) {
+	s.updateStatusCalls++
+	if s.updateStatusFunc != nil {
+		return s.updateStatusFunc(ctx, id, current, next, updatedAt)
+	}
+	return true, nil
 }
 
 type stubCache struct {
@@ -429,11 +439,20 @@ func TestNotificationService_CancelNotificationSuccess(t *testing.T) {
 		getByIDFunc: func(context.Context, uuid.UUID) (*models.Notification, error) {
 			return notification, nil
 		},
-		updateFunc: func(ctx context.Context, n *models.Notification) error {
-			if n.Status != models.Cancelled {
-				t.Fatalf("expected status Cancelled, got %s", n.Status)
+		updateStatusFunc: func(ctx context.Context, id uuid.UUID, current, next models.Status, updatedAt time.Time) (bool, error) {
+			if id != notification.ID {
+				t.Fatalf("unexpected id: %v", id)
 			}
-			return nil
+			if current != models.Scheduled {
+				t.Fatalf("expected current status Scheduled, got %v", current)
+			}
+			if next != models.Cancelled {
+				t.Fatalf("expected next status Cancelled, got %v", next)
+			}
+			if updatedAt.IsZero() {
+				t.Fatalf("updatedAt must be set")
+			}
+			return true, nil
 		},
 	}
 
@@ -458,8 +477,8 @@ func TestNotificationService_CancelNotificationSuccess(t *testing.T) {
 		t.Fatalf("CancelNotification returned error: %v", err)
 	}
 
-	if repo.getByIDCalls != 1 || repo.updateCalls != 1 {
-		t.Fatalf("expected repo GetByID and Update to be called once; got %d and %d", repo.getByIDCalls, repo.updateCalls)
+	if repo.getByIDCalls != 1 || repo.updateStatusCalls != 1 {
+		t.Fatalf("expected repo GetByID and UpdateStatus to be called once; got %d and %d", repo.getByIDCalls, repo.updateStatusCalls)
 	}
 
 	if len(cache.setCalls) != 1 {
@@ -475,9 +494,9 @@ func TestNotificationService_CancelNotificationGetError(t *testing.T) {
 		getByIDFunc: func(context.Context, uuid.UUID) (*models.Notification, error) {
 			return nil, expectedErr
 		},
-		updateFunc: func(context.Context, *models.Notification) error {
-			t.Fatalf("Update should not be called when GetByID fails")
-			return nil
+		updateStatusFunc: func(context.Context, uuid.UUID, models.Status, models.Status, time.Time) (bool, error) {
+			t.Fatalf("UpdateStatus should not be called when GetByID fails")
+			return false, nil
 		},
 	}
 
@@ -511,8 +530,8 @@ func TestNotificationService_CancelNotificationAlreadyProcessed(t *testing.T) {
 		t.Fatalf("expected error %v, got %v", ErrNotificationAlreadyProcessed, err)
 	}
 
-	if repo.updateCalls != 0 {
-		t.Fatalf("repository Update should not be called when notification already processed")
+	if repo.updateStatusCalls != 0 {
+		t.Fatalf("repository UpdateStatus should not be called when notification already processed")
 	}
 }
 
@@ -523,9 +542,9 @@ func TestNotificationService_CancelNotificationAlreadyCancelled(t *testing.T) {
 		getByIDFunc: func(context.Context, uuid.UUID) (*models.Notification, error) {
 			return notification, nil
 		},
-		updateFunc: func(context.Context, *models.Notification) error {
-			t.Fatalf("Update should not be called for already cancelled notification")
-			return nil
+		updateStatusFunc: func(context.Context, uuid.UUID, models.Status, models.Status, time.Time) (bool, error) {
+			t.Fatalf("UpdateStatus should not be called for already cancelled notification")
+			return false, nil
 		},
 	}
 
@@ -547,11 +566,20 @@ func TestNotificationService_NotifySuccess(t *testing.T) {
 		getByIDFunc: func(context.Context, uuid.UUID) (*models.Notification, error) {
 			return notification, nil
 		},
-		updateFunc: func(ctx context.Context, n *models.Notification) error {
-			if n.Status != models.Sent {
-				t.Fatalf("expected status Sent, got %s", n.Status)
+		updateStatusFunc: func(ctx context.Context, id uuid.UUID, current, next models.Status, updatedAt time.Time) (bool, error) {
+			if id != notification.ID {
+				t.Fatalf("unexpected id: %v", id)
 			}
-			return nil
+			if current != models.Scheduled {
+				t.Fatalf("expected current status Scheduled, got %v", current)
+			}
+			if next != models.Sent {
+				t.Fatalf("expected next status Sent, got %v", next)
+			}
+			if updatedAt.IsZero() {
+				t.Fatalf("updatedAt must be set")
+			}
+			return true, nil
 		},
 	}
 
@@ -598,8 +626,8 @@ func TestNotificationService_NotifySuccess(t *testing.T) {
 		t.Fatalf("expected notifier.Notify to be called once, got %d", notifier.calls)
 	}
 
-	if repo.updateCalls != 1 {
-		t.Fatalf("expected repository Update to be called once, got %d", repo.updateCalls)
+	if repo.updateStatusCalls != 1 {
+		t.Fatalf("expected repository UpdateStatus to be called once, got %d", repo.updateStatusCalls)
 	}
 }
 
@@ -611,11 +639,20 @@ func TestNotificationService_NotifyRetryFailure(t *testing.T) {
 		getByIDFunc: func(context.Context, uuid.UUID) (*models.Notification, error) {
 			return notification, nil
 		},
-		updateFunc: func(ctx context.Context, n *models.Notification) error {
-			if n.Status != models.Failed {
-				t.Fatalf("expected status Failed, got %s", n.Status)
+		updateStatusFunc: func(ctx context.Context, id uuid.UUID, current, next models.Status, updatedAt time.Time) (bool, error) {
+			if id != notification.ID {
+				t.Fatalf("unexpected id: %v", id)
 			}
-			return nil
+			if current != models.Scheduled {
+				t.Fatalf("expected current status Scheduled, got %v", current)
+			}
+			if next != models.Failed {
+				t.Fatalf("expected next status Failed, got %v", next)
+			}
+			if updatedAt.IsZero() {
+				t.Fatalf("updatedAt must be set")
+			}
+			return true, nil
 		},
 	}
 
@@ -660,8 +697,8 @@ func TestNotificationService_NotifyRetryFailure(t *testing.T) {
 		t.Fatalf("expected error %v, got %v", expectedErr, err)
 	}
 
-	if repo.updateCalls != 1 {
-		t.Fatalf("expected repository Update to be called once, got %d", repo.updateCalls)
+	if repo.updateStatusCalls != 1 {
+		t.Fatalf("expected repository UpdateStatus to be called once, got %d", repo.updateStatusCalls)
 	}
 
 	if notifier.calls != 1 {

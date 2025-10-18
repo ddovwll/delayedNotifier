@@ -134,11 +134,31 @@ func (s *NotificationService) CancelNotification(ctx context.Context, notificati
 		return nil
 	}
 
-	notification.Status = models.Cancelled
-	err = s.notificationRepository.Update(ctx, notification)
+	originalStatus := notification.Status
+	updatedAt := time.Now().UTC()
+	updated, err := s.notificationRepository.UpdateStatus(ctx, notification.ID, originalStatus, models.Cancelled, updatedAt)
 	if err != nil {
 		return err
 	}
+
+	if !updated {
+		latest, getErr := s.notificationRepository.GetByID(ctx, notificationId)
+		if getErr != nil {
+			return getErr
+		}
+		notification = latest
+		switch notification.Status {
+		case models.Sent, models.Failed:
+			return ErrNotificationAlreadyProcessed
+		case models.Cancelled:
+			return nil
+		default:
+			return errors.New("notification status changed during cancel")
+		}
+	}
+
+	notification.Status = models.Cancelled
+	notification.UpdatedAt = updatedAt
 
 	_, err = s.cache.Get(ctx, notification.ID.String())
 	if err == nil {
@@ -174,10 +194,22 @@ func (s *NotificationService) Notify(ctx context.Context, task models.DeliveryTa
 	})
 	outerErr := err
 	if err != nil {
-		notification.Status = models.Failed
-		err := s.notificationRepository.Update(ctx, notification)
-		if err != nil {
-			return err
+		updatedAt := time.Now().UTC()
+		originalStatus := notification.Status
+		updated, updateErr := s.notificationRepository.UpdateStatus(ctx, notification.ID, originalStatus, models.Failed, updatedAt)
+		if updateErr != nil {
+			return updateErr
+		}
+
+		if !updated {
+			latest, getErr := s.notificationRepository.GetByID(ctx, notification.ID)
+			if getErr != nil {
+				return getErr
+			}
+			notification = latest
+		} else {
+			notification.Status = models.Failed
+			notification.UpdatedAt = updatedAt
 		}
 
 		_, err = s.cache.Get(ctx, notification.ID.String())
@@ -195,10 +227,25 @@ func (s *NotificationService) Notify(ctx context.Context, task models.DeliveryTa
 		return outerErr
 	}
 
-	notification.Status = models.Sent
-	err = s.notificationRepository.Update(ctx, notification)
-	if err != nil {
-		return err
+	updatedAt := time.Now().UTC()
+	originalStatus := notification.Status
+	updated, updateErr := s.notificationRepository.UpdateStatus(ctx, notification.ID, originalStatus, models.Sent, updatedAt)
+	if updateErr != nil {
+		return updateErr
+	}
+
+	if !updated {
+		latest, getErr := s.notificationRepository.GetByID(ctx, notification.ID)
+		if getErr != nil {
+			return getErr
+		}
+		notification = latest
+		if notification.Status == models.Cancelled {
+			return errors.New("notification is cancelled")
+		}
+	} else {
+		notification.Status = models.Sent
+		notification.UpdatedAt = updatedAt
 	}
 
 	_, err = s.cache.Get(ctx, notification.ID.String())
